@@ -97,6 +97,10 @@ public class JasperGeneratorApp extends JFrame {
         JMenuItem addFilterMenuItem = new JMenuItem("Добавить фильтр...");
         filterPopupMenu.add(addFilterMenuItem);
 
+        JMenuItem clearFiltersMenuItem = new JMenuItem("Очистить все фильтры");
+        clearFiltersMenuItem.setEnabled(false);
+        filterPopupMenu.add(clearFiltersMenuItem);
+
         xmlTree.addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
@@ -110,11 +114,17 @@ public class JasperGeneratorApp extends JFrame {
                         xmlTree.setSelectionPath(path);
                         if (checkNode.isLeafField) {
                             addFilterMenuItem.setEnabled(true);
+                            clearFiltersMenuItem.setEnabled(false);
                             String label = checkNode.isAttribute ? checkNode.nodeName.replace("@", "") : checkNode.nodeName;
                             addFilterMenuItem.setText("Добавить фильтр для «" + label + "»...");
                             filterPopupMenu.show(e.getComponent(), e.getX(), e.getY());
+                        } else if (checkNode.hasFilters()) {
+                            addFilterMenuItem.setEnabled(false);
+                            clearFiltersMenuItem.setEnabled(true);
+                            filterPopupMenu.show(e.getComponent(), e.getX(), e.getY());
                         } else {
                             addFilterMenuItem.setEnabled(false);
+                            clearFiltersMenuItem.setEnabled(false);
                         }
                     } else {
                         if (!checkNode.isTriggeredNode) {
@@ -131,6 +141,21 @@ public class JasperGeneratorApp extends JFrame {
         });
 
         addFilterMenuItem.addActionListener(e -> openFilterDialog());
+
+        clearFiltersMenuItem.addActionListener(e -> {
+            TreePath selectedPath = xmlTree.getSelectionPath();
+            if (selectedPath != null) {
+                DefaultMutableTreeNode selectedNode = (DefaultMutableTreeNode) selectedPath.getLastPathComponent();
+                CheckboxNode checkNode = (CheckboxNode) selectedNode.getUserObject();
+                if (!checkNode.isLeafField && checkNode.hasFilters()) {
+                    checkNode.filters.clear();
+                    xmlTree.repaint();
+                    JOptionPane.showMessageDialog(JasperGeneratorApp.this,
+                            "Фильтры очищены для «" + checkNode.nodeName + "»",
+                            "Успех", JOptionPane.INFORMATION_MESSAGE);
+                }
+            }
+        });
 
         applyButton.addActionListener(e -> {
             String selectedTag = (String) tagComboBox.getSelectedItem();
@@ -388,18 +413,27 @@ public class JasperGeneratorApp extends JFrame {
 
     private void buildTreeNodes(Node node, DefaultMutableTreeNode treeNode, String currentPath, String immediateParent, boolean isTriggered, String startTag) {
         NodeList children = node.getChildNodes();
+        Set<String> processedChildNames = new HashSet<>();
+
         for (int i = 0; i < children.getLength(); i++) {
             Node child = children.item(i);
             if (child.getNodeType() == Node.ELEMENT_NODE) {
                 String tagName = child.getNodeName();
                 // Нормализуем для отображения в дереве
                 String displayTagName = tagName.contains(":") ? tagName.substring(tagName.lastIndexOf(":") + 1) : tagName;
+                String cleanTagName = tagName.contains(":") ? tagName.substring(tagName.lastIndexOf(":") + 1) : tagName;
+
+                // Если родитель называется ListOf - обрабатываем только один элемент с данным именем
+                String parentName = node.getNodeName();
+                String cleanParentName = parentName.contains(":") ? parentName.substring(parentName.lastIndexOf(":") + 1) : parentName;
+                if (cleanParentName.startsWith("ListOf") && processedChildNames.contains(cleanTagName)) {
+                    continue;
+                }
+                processedChildNames.add(cleanTagName);
+
                 String newPath = currentPath;
                 String nextImmediateParent = immediateParent;
                 boolean nextTriggered = isTriggered;
-
-                // Очищаем tagName от неймспейного префикса
-                String cleanTagName = tagName.contains(":") ? tagName.substring(tagName.lastIndexOf(":") + 1) : tagName;
 
                 if (!startTag.isEmpty() && !isTriggered) {
                     if (cleanTagName.equals(startTag)) {
