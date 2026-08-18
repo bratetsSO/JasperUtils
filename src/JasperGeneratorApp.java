@@ -122,6 +122,7 @@ public class JasperGeneratorApp extends JFrame {
                         }
                         boolean nextState = !checkNode.isSelected;
                         checkNode.isSelected = nextState;
+                        toggleChildSelection(node, nextState);
                         treeModel.nodeChanged(node);
                         xmlTree.repaint();
                     }
@@ -213,6 +214,19 @@ public class JasperGeneratorApp extends JFrame {
             JOptionPane.showMessageDialog(this,
                     "Фильтр добавлен!\n[" + condition + "]",
                     "Успех", JOptionPane.INFORMATION_MESSAGE);
+        }
+    }
+
+    private void toggleChildSelection(DefaultMutableTreeNode parent, boolean isSelected) {
+        int childCount = parent.getChildCount();
+        for (int i = 0; i < childCount; i++) {
+            DefaultMutableTreeNode child = (DefaultMutableTreeNode) parent.getChildAt(i);
+            CheckboxNode checkNode = (CheckboxNode) child.getUserObject();
+            // Устанавливаем галочку только на листьях (поля и атрибуты), не на родителях
+            if (checkNode.isLeafField) {
+                checkNode.isSelected = isSelected;
+                treeModel.nodeChanged(child);
+            }
         }
     }
 
