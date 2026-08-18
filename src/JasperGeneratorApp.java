@@ -8,21 +8,18 @@ import java.awt.datatransfer.StringSelection;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
 import java.util.*;
 import java.util.List;
 
 public class JasperGeneratorApp extends JFrame {
 
     private JTextField fileTextField;
-    private JTextField tagTextField;
+    private JComboBox<String> tagComboBox;
     private JTextArea outputTextArea;
     private JButton loadStructureButton;
     private JButton generateButton;
     private JButton browseButton;
     private JButton copyButton;
-    private JButton saveToFileButton;
 
     private JTree xmlTree;
     private DefaultTreeModel treeModel;
@@ -46,7 +43,7 @@ public class JasperGeneratorApp extends JFrame {
 
         // Строка 1: Выбор XML файла
         gbc.gridx = 0; gbc.gridy = 0; gbc.weightx = 0;
-        inputPanel.add(new JLabel("Путь к XML-файлу Siebel IO:"), gbc);
+        inputPanel.add(new JLabel("Путь к XML-файлу:"), gbc);
 
         gbc.gridx = 1; gbc.weightx = 1.0;
         fileTextField = new JTextField();
@@ -56,25 +53,37 @@ public class JasperGeneratorApp extends JFrame {
         browseButton = new JButton("Обзор...");
         inputPanel.add(browseButton, gbc);
 
-        // Строка 2: Настройка стартового тега
-        gbc.gridx = 0; gbc.gridy = 1;
-        inputPanel.add(new JLabel("Название стартового тега:"), gbc);
-
-        gbc.gridx = 1; gbc.gridy = 1; gbc.gridwidth = 2; gbc.weightx = 1.0;
-        tagTextField = new JTextField("K7mOpportunityPowersConfirmationNonui");
-        inputPanel.add(tagTextField, gbc);
-
-        // Строка 3: Кнопки управления структурой
-        gbc.gridx = 0; gbc.gridy = 2; gbc.gridwidth = 3;
-        JPanel buttonsPanel = new JPanel(new GridLayout(1, 2, 10, 0));
-        loadStructureButton = new JButton("1. Загрузить структуру XML");
+        gbc.gridx = 3;
+        loadStructureButton = new JButton("Загрузить структуру XML");
         loadStructureButton.setFont(new Font("Arial", Font.BOLD, 12));
-        generateButton = new JButton("2. Сгенерировать код для .JRXML");
+        inputPanel.add(loadStructureButton, gbc);
+
+        // Строка 2: Настройка стартового тега
+        gbc.gridx = 0; gbc.gridy = 1; gbc.gridwidth = 1;
+        inputPanel.add(new JLabel("Стартовый тег:"), gbc);
+
+        gbc.gridx = 1; gbc.gridy = 1; gbc.gridwidth = 1;
+        tagComboBox = new JComboBox<>();
+        tagComboBox.setEditable(true);
+        tagComboBox.setPreferredSize(new Dimension(300, tagComboBox.getPreferredSize().height));
+        inputPanel.add(tagComboBox, gbc);
+
+        gbc.gridx = 2; gbc.gridwidth = 1;
+        JButton applyButton = new JButton("Применить");
+        applyButton.setFont(new Font("Arial", Font.BOLD, 12));
+        inputPanel.add(applyButton, gbc);
+
+        gbc.gridx = 3; gbc.gridwidth = 1;
+        generateButton = new JButton("Сгенерировать код для .JRXML");
         generateButton.setFont(new Font("Arial", Font.BOLD, 12));
         generateButton.setEnabled(false);
-        buttonsPanel.add(loadStructureButton);
-        buttonsPanel.add(generateButton);
-        inputPanel.add(buttonsPanel, gbc);
+        inputPanel.add(generateButton, gbc);
+
+        gbc.gridx = 3; gbc.gridwidth = 1;
+        copyButton = new JButton("Копировать в буфер обмена");
+        copyButton.setFont(new Font("Arial", Font.BOLD, 12));
+        copyButton.setEnabled(false);
+        inputPanel.add(copyButton, gbc);
 
         // Центральная часть: Сплит-панель (Дерево слева, Результат справа)
         rootCheckboxNode = new CheckboxNode("Структура не загружена", "", "", false);
@@ -84,6 +93,10 @@ public class JasperGeneratorApp extends JFrame {
         xmlTree.setCellRenderer(new CheckboxNodeRenderer());
         xmlTree.setSelectionRow(0);
 
+        JPopupMenu filterPopupMenu = new JPopupMenu();
+        JMenuItem addFilterMenuItem = new JMenuItem("Добавить фильтр...");
+        filterPopupMenu.add(addFilterMenuItem);
+
         xmlTree.addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
@@ -92,12 +105,36 @@ public class JasperGeneratorApp extends JFrame {
                     TreePath path = xmlTree.getPathForLocation(e.getX(), e.getY());
                     DefaultMutableTreeNode node = (DefaultMutableTreeNode) path.getLastPathComponent();
                     CheckboxNode checkNode = (CheckboxNode) node.getUserObject();
-                    boolean nextState = !checkNode.isSelected;
 
-                    toggleNodeSelection(node, nextState);
-                    treeModel.nodeChanged(node);
-                    xmlTree.repaint();
+                    if (SwingUtilities.isRightMouseButton(e)) {
+                        xmlTree.setSelectionPath(path);
+                        if (checkNode.isLeafField) {
+                            addFilterMenuItem.setEnabled(true);
+                            String label = checkNode.isAttribute ? checkNode.nodeName.replace("@", "") : checkNode.nodeName;
+                            addFilterMenuItem.setText("Добавить фильтр для «" + label + "»...");
+                            filterPopupMenu.show(e.getComponent(), e.getX(), e.getY());
+                        } else {
+                            addFilterMenuItem.setEnabled(false);
+                        }
+                    } else {
+                        if (!checkNode.isTriggeredNode) {
+                            return;
+                        }
+                        boolean nextState = !checkNode.isSelected;
+                        checkNode.isSelected = nextState;
+                        treeModel.nodeChanged(node);
+                        xmlTree.repaint();
+                    }
                 }
+            }
+        });
+
+        addFilterMenuItem.addActionListener(e -> openFilterDialog());
+
+        applyButton.addActionListener(e -> {
+            String selectedTag = (String) tagComboBox.getSelectedItem();
+            if (selectedTag != null && !selectedTag.trim().isEmpty() && currentDoc != null) {
+                rebuildTreeWithStartTag(selectedTag.trim());
             }
         });
 
@@ -113,25 +150,10 @@ public class JasperGeneratorApp extends JFrame {
         JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, treeScrollPane, textScrollPane);
         splitPane.setDividerLocation(480);
 
-        // Нижняя панель действий
-        JPanel actionPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 5));
-        copyButton = new JButton("Копировать в буфер обмена");
-        copyButton.setFont(new Font("Arial", Font.BOLD, 12));
-        copyButton.setEnabled(false);
-
-        saveToFileButton = new JButton("Сохранить в файл...");
-        saveToFileButton.setFont(new Font("Arial", Font.BOLD, 12));
-        saveToFileButton.setEnabled(false);
-
-        actionPanel.add(copyButton);
-        actionPanel.add(saveToFileButton);
-
         // Компоновка
         setLayout(new BorderLayout());
         add(inputPanel, BorderLayout.NORTH);
         add(splitPane, BorderLayout.CENTER);
-        add(addSelectButtonsPanel(treeRoot), BorderLayout.WEST);
-        add(actionPanel, BorderLayout.SOUTH);
 
         // События кнопок
         browseButton.addActionListener(e -> {
@@ -156,48 +178,48 @@ public class JasperGeneratorApp extends JFrame {
             }
         });
 
-        saveToFileButton.addActionListener(e -> saveOutputToFile());
     }
 
-    private JPanel addSelectButtonsPanel(DefaultMutableTreeNode treeRoot) {
-        JPanel panel = new JPanel(new GridBagLayout());
-        panel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.gridx = 0; gbc.gridy = 0; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1;
-        gbc.insets = new Insets(2, 2, 2, 2);
+    private void openFilterDialog() {
+        TreePath selectedPath = xmlTree.getSelectionPath();
+        if (selectedPath == null) return;
 
-        JButton selectAllBtn = new JButton("Выбрать всё");
-        selectAllBtn.addActionListener(e -> {
-            toggleNodeSelection(treeRoot, true);
+        DefaultMutableTreeNode selectedNode = (DefaultMutableTreeNode) selectedPath.getLastPathComponent();
+        CheckboxNode checkNode = (CheckboxNode) selectedNode.getUserObject();
+
+        if (!checkNode.isLeafField) {
+            JOptionPane.showMessageDialog(this, "Выберите конечное поле для добавления фильтра.",
+                    "Внимание", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        DefaultMutableTreeNode parentNode = (DefaultMutableTreeNode) selectedNode.getParent();
+        if (parentNode == null) return;
+        CheckboxNode parentCheckNode = (CheckboxNode) parentNode.getUserObject();
+
+        String label = checkNode.nodeName;
+        String displayLabel = label.replace("@", "");
+        String filterValue = JOptionPane.showInputDialog(this,
+                "Введите значение фильтра:\n\n"
+                        + "Поле: " + displayLabel + "\n"
+                        + "Родитель: " + parentCheckNode.nodeName + "\n\n"
+                        + "Результат: [" + label + "='value']",
+                "Добавить фильтр", JOptionPane.INFORMATION_MESSAGE);
+
+        if (filterValue != null && !filterValue.trim().isEmpty()) {
+            String condition = label + "='" + filterValue.trim() + "'";
+            parentCheckNode.addFilter(condition, parentCheckNode.nodeName);
             xmlTree.repaint();
-        });
-        panel.add(selectAllBtn, gbc);
-
-        gbc.gridy = 1;
-        JButton deselectAllBtn = new JButton("Снять всё");
-        deselectAllBtn.addActionListener(e -> {
-            toggleNodeSelection(treeRoot, false);
-            xmlTree.repaint();
-        });
-        panel.add(deselectAllBtn, gbc);
-
-        return panel;
-    }
-
-    private void toggleNodeSelection(DefaultMutableTreeNode node, boolean isSelected) {
-        CheckboxNode checkNode = (CheckboxNode) node.getUserObject();
-        checkNode.isSelected = isSelected;
-        treeModel.nodeChanged(node);
-
-        int childCount = node.getChildCount();
-        for (int i = 0; i < childCount; i++) {
-            toggleNodeSelection((DefaultMutableTreeNode) node.getChildAt(i), isSelected);
+            JOptionPane.showMessageDialog(this,
+                    "Фильтр добавлен!\n[" + condition + "]",
+                    "Успех", JOptionPane.INFORMATION_MESSAGE);
         }
     }
 
     private void parseXmlStructure() {
         String filePath = fileTextField.getText().trim();
-        String startTag = tagTextField.getText().trim();
+        String startTag = ((String) tagComboBox.getSelectedItem());
+        startTag = startTag != null ? startTag.trim() : "";
 
         if (filePath.isEmpty()) {
             JOptionPane.showMessageDialog(this, "Пожалуйста, выберите XML-файл.", "Ошибка", JOptionPane.ERROR_MESSAGE);
@@ -220,10 +242,17 @@ public class JasperGeneratorApp extends JFrame {
             DefaultMutableTreeNode treeRoot = (DefaultMutableTreeNode) treeModel.getRoot();
             treeRoot.removeAllChildren();
 
-            rootCheckboxNode = new CheckboxNode(currentDoc.getDocumentElement().getNodeName(), "", "", true);
+            rootCheckboxNode = new CheckboxNode(currentDoc.getDocumentElement().getNodeName(), "", "", false);
             treeRoot.setUserObject(rootCheckboxNode);
 
+            // Заполняем выпадающий список родительскими тегами (исключая ListOf)
+            populateStartTagOptions(currentDoc.getDocumentElement());
+
             buildTreeNodes(currentDoc.getDocumentElement(), treeRoot, "", "", false, startTag);
+
+            // Устанавливаем startTag на все узлы дерева
+            DefaultMutableTreeNode treeRootNode = (DefaultMutableTreeNode) treeModel.getRoot();
+            updateStartTagInTree(treeRootNode, startTag);
 
             treeModel.reload();
             for (int i = 0; i < xmlTree.getRowCount(); i++) {
@@ -233,7 +262,6 @@ public class JasperGeneratorApp extends JFrame {
             generateButton.setEnabled(true);
             outputTextArea.setText("");
             copyButton.setEnabled(false);
-            saveToFileButton.setEnabled(false);
             JOptionPane.showMessageDialog(this, "Структура XML успешно загружена!", "Успех", JOptionPane.INFORMATION_MESSAGE);
 
         } catch (Exception ex) {
@@ -242,50 +270,138 @@ public class JasperGeneratorApp extends JFrame {
         }
     }
 
-    private void buildTreeNodes(Node node, DefaultMutableTreeNode treeNode, String currentPath, String immediateParent, boolean isTriggered, String startTag) {
-        // Проверяем наличие атрибутов у текущего тега
-        if (node.hasAttributes()) {
-            NamedNodeMap attributes = node.getAttributes();
-            for (int a = 0; a < attributes.getLength(); a++) {
-                Node attr = attributes.item(a);
-                String attrName = attr.getNodeName();
+    private void populateStartTagOptions(Element rootElement) {
+        // Сохраняем текущее значение пользователя
+        String savedValue = (String) tagComboBox.getEditor().getItem();
 
-                // Пропускаем встроенные пространства имен xmlns, если они есть
-                if (attrName.startsWith("xmlns") || attrName.contains(":")) continue;
+        // Очищаем текущие опции
+        tagComboBox.removeAllItems();
 
-                // Путь XPath для атрибута формируется через /@имя_атрибута
-                String attrPath = currentPath + "/@" + attrName;
+        // Собираем только родительские теги (у которых есть дочерние элементы), исключая ListOf
+        Set<String> parentTags = new LinkedHashSet<>();
+        collectParentTags(rootElement, parentTags);
 
-                CheckboxNode attrData = new CheckboxNode("@" + attrName, attrPath, immediateParent, true);
-                attrData.isLeafField = true;
-                attrData.isAttribute = true;
-                attrData.isTriggeredNode = (startTag.isEmpty() || isTriggered);
+        // Добавляем в комбо-бокс (пустой элемент для «использовать корень»)
+        tagComboBox.addItem("");
+        for (String tag : parentTags) {
+            tagComboBox.addItem(tag);
+        }
 
-                DefaultMutableTreeNode attrTreeNode = new DefaultMutableTreeNode(attrData);
-                treeNode.add(attrTreeNode);
+        // Восстанавливаем значение пользователя, если оно есть в списке, иначе оставляем как есть
+        if (savedValue != null && !savedValue.trim().isEmpty()) {
+            boolean found = false;
+            for (int i = 0; i < tagComboBox.getItemCount(); i++) {
+                if (tagComboBox.getItemAt(i).equals(savedValue)) {
+                    tagComboBox.setSelectedIndex(i);
+                    found = true;
+                    break;
+                }
+            }
+            // Если не нашли в списке — добавляем как пользовательское значение
+            if (!found) {
+                tagComboBox.getEditor().setItem(savedValue);
+            }
+        }
+    }
+
+    private void updateNodeTriggeredState(DefaultMutableTreeNode node, String startTag, boolean isTriggered) {
+        CheckboxNode checkNode = (CheckboxNode) node.getUserObject();
+
+        if (!startTag.isEmpty() && !isTriggered) {
+            String nodeName = checkNode.nodeName.replace("@", "");
+            if (nodeName.equals(startTag)) {
+                isTriggered = true;
             }
         }
 
+        checkNode.isTriggeredNode = isTriggered;
+
+        int childCount = node.getChildCount();
+        for (int i = 0; i < childCount; i++) {
+            updateNodeTriggeredState((DefaultMutableTreeNode) node.getChildAt(i), startTag, isTriggered);
+        }
+    }
+
+    private void updateStartTagInTree(DefaultMutableTreeNode node, String startTag) {
+        CheckboxNode checkNode = (CheckboxNode) node.getUserObject();
+        checkNode.setStartTag(startTag);
+        int childCount = node.getChildCount();
+        for (int i = 0; i < childCount; i++) {
+            updateStartTagInTree((DefaultMutableTreeNode) node.getChildAt(i), startTag);
+        }
+    }
+
+    private void rebuildTreeWithStartTag(String startTag) {
+        DefaultMutableTreeNode treeRoot = (DefaultMutableTreeNode) treeModel.getRoot();
+        treeRoot.removeAllChildren();
+        CheckboxNode rootNode = new CheckboxNode(currentDoc.getDocumentElement().getNodeName(), "", "", false);
+        treeRoot.setUserObject(rootNode);
+
+        populateStartTagOptions(currentDoc.getDocumentElement());
+        buildTreeNodes(currentDoc.getDocumentElement(), treeRoot, "", "", false, startTag);
+        updateStartTagInTree(treeRoot, startTag);
+        treeModel.reload();
+        for (int i = 0; i < xmlTree.getRowCount(); i++) {
+            xmlTree.expandRow(i);
+        }
+        xmlTree.repaint();
+        JOptionPane.showMessageDialog(this, "Дерево перестроено для тега: " + startTag, "Успех", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private void collectParentTags(Element element, Set<String> seenTags) {
+        boolean hasChildren = false;
+        NodeList children = element.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            if (children.item(i).getNodeType() == Node.ELEMENT_NODE) {
+                hasChildren = true;
+                break;
+            }
+        }
+
+        String tagName = element.getNodeName();
+        String cleanTagName = tagName.contains(":") ? tagName.substring(tagName.lastIndexOf(":") + 1) : tagName;
+        if (hasChildren && !cleanTagName.startsWith("ListOf")) {
+            seenTags.add(cleanTagName);
+        }
+
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child.getNodeType() == Node.ELEMENT_NODE) {
+                collectParentTags((Element) child, seenTags);
+            }
+        }
+    }
+
+    private void buildTreeNodes(Node node, DefaultMutableTreeNode treeNode, String currentPath, String immediateParent, boolean isTriggered, String startTag) {
         NodeList children = node.getChildNodes();
         for (int i = 0; i < children.getLength(); i++) {
             Node child = children.item(i);
             if (child.getNodeType() == Node.ELEMENT_NODE) {
                 String tagName = child.getNodeName();
+                // Нормализуем для отображения в дереве
+                String displayTagName = tagName.contains(":") ? tagName.substring(tagName.lastIndexOf(":") + 1) : tagName;
                 String newPath = currentPath;
                 String nextImmediateParent = immediateParent;
                 boolean nextTriggered = isTriggered;
 
+                // Очищаем tagName от неймспейного префикса
+                String cleanTagName = tagName.contains(":") ? tagName.substring(tagName.lastIndexOf(":") + 1) : tagName;
+
                 if (!startTag.isEmpty() && !isTriggered) {
-                    if (tagName.equals(startTag)) {
+                    if (cleanTagName.equals(startTag)) {
                         nextTriggered = true;
-                        newPath = tagName;
-                        nextImmediateParent = tagName;
+                        newPath = startTag;
+                        nextImmediateParent = cleanTagName;
                     }
                 } else {
-                    newPath = currentPath.isEmpty() ? tagName : currentPath + "/" + tagName;
+                    if (isTriggered) {
+                        newPath = currentPath + "/" + cleanTagName;
+                    } else {
+                        newPath = currentPath.isEmpty() ? cleanTagName : currentPath + "/" + cleanTagName;
+                    }
                     if (isTriggered || startTag.isEmpty()) {
-                        if (!tagName.startsWith("ListOf")) {
-                            nextImmediateParent = tagName;
+                        if (!cleanTagName.startsWith("ListOf")) {
+                            nextImmediateParent = cleanTagName;
                         }
                     }
                 }
@@ -299,14 +415,38 @@ public class JasperGeneratorApp extends JFrame {
                     }
                 }
 
-                CheckboxNode childData = new CheckboxNode(tagName, newPath, nextImmediateParent, true);
+                CheckboxNode childData = new CheckboxNode(displayTagName, newPath, immediateParent, false);
                 childData.isLeafField = !hasChildElements;
-                childData.isTriggeredNode = (startTag.isEmpty() || nextTriggered);
+                childData.isTriggeredNode = nextTriggered;
+                childData.parentTagName = node.getNodeName();
+                if (nextTriggered) {
+                    childData.setStartTag(startTag);
+                }
 
                 DefaultMutableTreeNode childTreeNode = new DefaultMutableTreeNode(childData);
                 treeNode.add(childTreeNode);
 
-                // Рекурсивно идем вглубь (передаем дочерний элемент для анализа его детей и атрибутов)
+                // Атрибуты добавляем как дочерние к childTreeNode
+                if (child.hasAttributes()) {
+                    NamedNodeMap attributes = child.getAttributes();
+                    for (int a = 0; a < attributes.getLength(); a++) {
+                        Node attr = attributes.item(a);
+                        String attrName = attr.getNodeName();
+                        if (attrName.startsWith("xmlns")) continue;
+                        String cleanAttrName = attrName.contains(":") ? attrName.substring(attrName.lastIndexOf(":") + 1) : attrName;
+                        String attrPath = newPath + "/@" + cleanAttrName;
+                        CheckboxNode attrData = new CheckboxNode("@" + attrName, attrPath, immediateParent, false);
+                        attrData.isLeafField = true;
+                        attrData.isAttribute = true;
+                        attrData.isTriggeredNode = nextTriggered;
+                        if (nextTriggered) {
+                            attrData.setStartTag(startTag);
+                        }
+                        DefaultMutableTreeNode attrTreeNode = new DefaultMutableTreeNode(attrData);
+                        childTreeNode.add(attrTreeNode);
+                    }
+                }
+
                 buildTreeNodes(child, childTreeNode, newPath, nextImmediateParent, nextTriggered, startTag);
             }
         }
@@ -330,8 +470,8 @@ public class JasperGeneratorApp extends JFrame {
 
         if (!variablesOutput.isEmpty()) {
             sb.append("\n<!-- ====================================================================== -->\n");
-            sb.append("<!-- СЕКЦИЯ ПЕРЕМЕННЫХ ДЛЯ ВСТАВКИ В .JRXML                                 -->");
-                    sb.append("<!-- ====================================================================== -->\n");
+            sb.append("<!-- СЕКЦИЯ ПЕРЕМЕННЫХ ДЛЯ ВСТАВКИ В .JRXML                                 -->\n");
+            sb.append("<!-- ====================================================================== -->\n");
             for (String varStr : variablesOutput) {
                 sb.append(varStr).append("\n");
             }
@@ -342,30 +482,50 @@ public class JasperGeneratorApp extends JFrame {
 
         boolean hasContent = !sb.toString().isEmpty();
         copyButton.setEnabled(hasContent);
-        saveToFileButton.setEnabled(hasContent);
     }
 
     private void collectSelectedFields(DefaultMutableTreeNode treeNode, List<String> fieldsOutput, List<String> variablesOutput) {
+        collectSelectedFields(treeNode, fieldsOutput, variablesOutput, new ArrayList<>());
+    }
+
+    private void collectSelectedFields(DefaultMutableTreeNode treeNode, List<String> fieldsOutput, List<String> variablesOutput, List<CheckboxNode.FilterEntry> ancestorFilters) {
         CheckboxNode checkNode = (CheckboxNode) treeNode.getUserObject();
 
+        // Собираем фильтры от этого узла
+        List<CheckboxNode.FilterEntry> currentFilters = new ArrayList<>(ancestorFilters);
+        currentFilters.addAll(checkNode.filters);
+
         if (checkNode.isSelected && checkNode.isLeafField && checkNode.isTriggeredNode) {
-            String finalXpath = "//" + checkNode.xpathPath;
+            String finalXpath = checkNode.buildFilteredXpathWithAncestors(currentFilters);
+            boolean hasFilters = checkNode.hasFilters() || !ancestorFilters.isEmpty();
 
             if (!seenXpaths.contains(finalXpath)) {
                 seenXpaths.add(finalXpath);
 
-                // Формируем имя поля. Если это атрибут, убираем символ @ из названия переменной, чтобы .jrxml был валидным
                 String cleanNodeName = checkNode.nodeName.replace("@", "");
-                String fieldNameWithPrefix = checkNode.parentPrefix + "_" + cleanNodeName;
+                String prefix = (checkNode.parentPrefix != null && !checkNode.parentPrefix.isEmpty())
+                        ? checkNode.parentPrefix
+                        : "";
+                String fieldNameWithPrefix = prefix.isEmpty()
+                        ? cleanNodeName
+                        : prefix + "_" + cleanNodeName;
 
-                // Добавляем маркер _attr к имени поля, если это атрибут тега, для предотвращения пересечений имен
                 if (checkNode.isAttribute) {
                     fieldNameWithPrefix += "_attr";
                 }
 
-                String fieldXml = "    <field name=\"" + fieldNameWithPrefix + "\" class=\"java.lang.String\">\n" +
-                        "        <property name=\"net.sf.jasperreports.xpath.field.expression\" value=\"" + finalXpath + "\"/>\n" +
-                        "    </field>";
+                String fieldXml;
+                if (hasFilters) {
+                    fieldXml = "    <field name=\"" + fieldNameWithPrefix + "\" class=\"java.lang.String\">\n" +
+                            "        <property name=\"net.sf.jasperreports.xpath.field.expression\">\n" +
+                            "            <![CDATA[" + finalXpath + "]]>\n" +
+                            "        </property>\n" +
+                            "    </field>";
+                } else {
+                    fieldXml = "    <field name=\"" + fieldNameWithPrefix + "\" class=\"java.lang.String\">\n" +
+                            "        <property name=\"net.sf.jasperreports.xpath.field.expression\" value=\"" + finalXpath + "\"/>\n" +
+                            "    </field>";
+                }
                 fieldsOutput.add(fieldXml);
 
                 // Генерация переменных для дат (только для обычных полей, содержащих Date)
@@ -383,33 +543,7 @@ public class JasperGeneratorApp extends JFrame {
 
         int childCount = treeNode.getChildCount();
         for (int i = 0; i < childCount; i++) {
-            collectSelectedFields((DefaultMutableTreeNode) treeNode.getChildAt(i), fieldsOutput, variablesOutput);
-        }
-    }
-
-    private void saveOutputToFile() {
-        String content = outputTextArea.getText();
-        if (content.isEmpty()) return;
-
-        JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("Сохранить XML код полей");
-        fileChooser.setSelectedFile(new File("jasper_fields.xml"));
-        fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("XML файлы (*.xml, *.txt)", "xml", "txt"));
-
-        int userSelection = fileChooser.showSaveDialog(this);
-        if (userSelection == JFileChooser.APPROVE_OPTION) {
-            File fileToSave = fileChooser.getSelectedFile();
-            if (!fileToSave.getName().contains(".")) {
-                fileToSave = new File(fileToSave.getAbsolutePath() + ".xml");
-            }
-
-            try (FileWriter writer = new FileWriter(fileToSave)) {
-                writer.write(content);
-                JOptionPane.showMessageDialog(this, "Файл успешно сохранен:\n" + fileToSave.getAbsolutePath(), "Успех", JOptionPane.INFORMATION_MESSAGE);
-            } catch (IOException ex) {
-                JOptionPane.showMessageDialog(this, "Не удалось сохранить файл:\n" + ex.getMessage(), "Ошибка записи", JOptionPane.ERROR_MESSAGE);
-                ex.printStackTrace();
-            }
+            collectSelectedFields((DefaultMutableTreeNode) treeNode.getChildAt(i), fieldsOutput, variablesOutput, currentFilters);
         }
     }
 
@@ -417,16 +551,118 @@ public class JasperGeneratorApp extends JFrame {
         String nodeName;
         String xpathPath;
         String parentPrefix;
+        String parentTagName = "";
         boolean isSelected;
         boolean isLeafField = false;
         boolean isTriggeredNode = false;
-        boolean isAttribute = false; // Новое свойство-маркер для атрибутов
+        boolean isAttribute = false;
+
+        // Храним фильтр вместе с именем узла-предка, к которому он относится
+        List<FilterEntry> filters = new ArrayList<>();
+        String startTag = "";
+
+        static class FilterEntry {
+            String condition;
+            String ancestorName; // имя узла, на который наложен фильтр
+
+            FilterEntry(String condition, String ancestorName) {
+                this.condition = condition;
+                this.ancestorName = ancestorName;
+            }
+        }
 
         public CheckboxNode(String nodeName, String xpathPath, String parentPrefix, boolean isSelected) {
             this.nodeName = nodeName;
             this.xpathPath = xpathPath;
             this.parentPrefix = parentPrefix;
             this.isSelected = isSelected;
+        }
+
+        public void setStartTag(String startTag) {
+            this.startTag = startTag;
+        }
+
+        public void addFilter(String condition, String ancestorName) {
+            filters.add(new FilterEntry(condition, ancestorName));
+        }
+
+        public boolean hasFilters() {
+            return !filters.isEmpty();
+        }
+
+        public String buildFilteredXpath() {
+            return buildFilteredXpathWithAncestors(filters);
+        }
+
+        public String buildFilteredXpathWithAncestors(List<FilterEntry> ancestorFilters) {
+            String[] pathParts = xpathPath.split("/");
+
+            // Находим индекс стартового тега в пути
+            int startIndex = 0;
+            if (!startTag.isEmpty()) {
+                // Ищем ПОСЛЕДНЕЕ вхождение startTag в пути
+                for (int i = pathParts.length - 1; i >= 0; i--) {
+                    if (pathParts[i].replace("@", "").equals(startTag)) {
+                        startIndex = i;
+                        break;
+                    }
+                }
+            } else if (!ancestorFilters.isEmpty()) {
+                // Если startTag не установлен, берём первый ancestor
+                String firstAncestor = ancestorFilters.get(0).ancestorName;
+                for (int i = 0; i < pathParts.length; i++) {
+                    if (pathParts[i].replace("@", "").equals(firstAncestor)) {
+                        startIndex = i;
+                        break;
+                    }
+                }
+            }
+
+            // К каждому сегменту пути (начиная с первого ancestor) собираем список предикатов
+            Map<Integer, List<String>> predicatesByPart = new LinkedHashMap<>();
+            for (int i = startIndex; i < pathParts.length; i++) {
+                predicatesByPart.put(i, new ArrayList<>());
+            }
+
+            for (CheckboxNode.FilterEntry filterEntry : ancestorFilters) {
+                String predicate = filterEntry.condition;
+                String ancestorName = filterEntry.ancestorName;
+
+                // Ищем индекс ancestor-узла в пути
+                int targetPart = -1;
+                for (int i = startIndex; i < pathParts.length; i++) {
+                    if (pathParts[i].replace("@", "").equals(ancestorName)) {
+                        targetPart = i;
+                        break;
+                    }
+                }
+
+                // Если ancestor не найден — применяем к последнему элементу пути
+                if (targetPart == -1) {
+                    for (int i = pathParts.length - 1; i >= startIndex; i--) {
+                        if (!pathParts[i].startsWith("@")) {
+                            targetPart = i;
+                            break;
+                        }
+                    }
+                    if (targetPart == -1) targetPart = startIndex;
+                }
+
+                predicatesByPart.get(targetPart).add(predicate);
+            }
+
+            // Собираем итоговый XPath, начиная с ancestor-а (стартового тега)
+            StringBuilder result = new StringBuilder("//");
+            for (int i = startIndex; i < pathParts.length; i++) {
+                if (i > startIndex) result.append("/");
+                result.append(pathParts[i]);
+                List<String> preds = predicatesByPart.get(i);
+                if (!preds.isEmpty()) {
+                    result.append("[").append(String.join(" and ", preds)).append("]");
+                }
+            }
+
+            return result.toString();
         }
 
         @Override
@@ -460,20 +696,26 @@ public class JasperGeneratorApp extends JFrame {
                 CheckboxNode checkNode = (CheckboxNode) userObj;
                 checkBox.setVisible(true);
                 checkBox.setSelected(checkNode.isSelected);
+                checkBox.setEnabled(checkNode.isTriggeredNode);
                 label.setText(checkNode.nodeName);
 
-                if (checkNode.isAttribute) {
-                    // Атрибуты выделяем темно-зеленым цветом со сдвигом шрифта
+                if (!checkNode.isTriggeredNode) {
+                    label.setForeground(new Color(169, 169, 169));
+                    label.setFont(new Font("Arial", Font.BOLD, 12));
+                } else if (checkNode.isAttribute) {
                     label.setFont(new Font("Arial", Font.BOLD, 12));
                     label.setForeground(new Color(0, 128, 64));
                 } else if (checkNode.isLeafField) {
-                    // Конечные теги-поля выделяем синим цветом
                     label.setFont(new Font("Arial", Font.ITALIC | Font.BOLD, 12));
                     label.setForeground(new Color(0, 102, 204));
                 } else {
-                    // Компоненты-родители остаются стандартными
                     label.setFont(new Font("Arial", Font.BOLD, 12));
                     label.setForeground(Color.BLACK);
+                }
+
+                if (checkNode.hasFilters()) {
+                    int filterCount = checkNode.filters.size();
+                    label.setText(checkNode.nodeName + " [" + filterCount + "]");
                 }
             } else {
                 checkBox.setVisible(false);
