@@ -98,7 +98,10 @@ public class JasperSafeFieldAndVariableGenerator {
                         seenXpaths.add(finalXpath);
 
                         // Требование: имя поля формируется всегда как ЕдинственныйПредок_ИмяПоля
-                        String fieldNameWithPrefix = immediateParent + "_" + tagName;
+                        String prefix = (immediateParent != null && !immediateParent.isEmpty()) ? immediateParent : "";
+                        String fieldNameWithPrefix = prefix.isEmpty()
+                                ? tagName
+                                : prefix + "_" + tagName;
 
                         // Формируем XML для тега <field>
                         String fieldXml = "    <field name=\"" + fieldNameWithPrefix + "\" class=\"java.lang.String\">\n" +
