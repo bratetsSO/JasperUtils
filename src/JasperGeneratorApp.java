@@ -20,6 +20,7 @@ public class JasperGeneratorApp extends JFrame {
     private JButton generateButton;
     private JButton browseButton;
     private JButton copyButton;
+    private JButton applyButton;
 
     private JTree xmlTree;
     private DefaultTreeModel treeModel;
@@ -69,8 +70,9 @@ public class JasperGeneratorApp extends JFrame {
         inputPanel.add(tagComboBox, gbc);
 
         gbc.gridx = 2; gbc.gridwidth = 1;
-        JButton applyButton = new JButton("Применить");
+        applyButton = new JButton("Применить");
         applyButton.setFont(new Font("Arial", Font.BOLD, 12));
+        applyButton.setEnabled(false);
         inputPanel.add(applyButton, gbc);
 
         gbc.gridx = 3; gbc.gridwidth = 1;
@@ -170,6 +172,33 @@ public class JasperGeneratorApp extends JFrame {
         outputTextArea = new JTextArea();
         outputTextArea.setFont(new Font("Consolas", Font.PLAIN, 12));
         outputTextArea.setEditable(false);
+
+        // Контекстное меню для текстовой области генерации
+        JPopupMenu outputPopupMenu = new JPopupMenu();
+        JMenuItem copyOutputMenuItem = new JMenuItem("Копировать");
+        copyOutputMenuItem.addActionListener(e -> {
+            int selStart = outputTextArea.getSelectionStart();
+            int selEnd = outputTextArea.getSelectionEnd();
+            if (selStart != selEnd) {
+                String selectedText = outputTextArea.getSelectedText();
+                StringSelection stringSelection = new StringSelection(selectedText);
+                Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
+                clipboard.setContents(stringSelection, null);
+            }
+        });
+        outputPopupMenu.add(copyOutputMenuItem);
+
+        outputTextArea.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) {
+                if (SwingUtilities.isRightMouseButton(e)) {
+                    if (outputTextArea.getSelectedText() != null && outputTextArea.getSelectionStart() != outputTextArea.getSelectionEnd()) {
+                        outputPopupMenu.show(e.getComponent(), e.getX(), e.getY());
+                    }
+                }
+            }
+        });
+
         JScrollPane textScrollPane = new JScrollPane(outputTextArea);
         textScrollPane.setBorder(BorderFactory.createTitledBorder("Результат генерации"));
 
@@ -188,11 +217,28 @@ public class JasperGeneratorApp extends JFrame {
             int returnValue = fileChooser.showOpenDialog(this);
             if (returnValue == JFileChooser.APPROVE_OPTION) {
                 fileTextField.setText(fileChooser.getSelectedFile().getAbsolutePath());
+                updateButtonStates();
             }
+        });
+
+        fileTextField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { updateButtonStates(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { updateButtonStates(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { updateButtonStates(); }
+        });
+
+        tagComboBox.addActionListener(e -> {
+            updateButtonStates();
+        });
+
+        xmlTree.addTreeSelectionListener(e -> {
+            updateGenerateButtonState();
         });
 
         loadStructureButton.addActionListener(e -> parseXmlStructure());
         generateButton.addActionListener(e -> generateCodeFromSelected());
+
+        updateButtonStates();
 
         copyButton.addActionListener(e -> {
             String textToCopy = outputTextArea.getText();
@@ -204,6 +250,34 @@ public class JasperGeneratorApp extends JFrame {
             }
         });
 
+    }
+
+    private void updateButtonStates() {
+        String filePath = fileTextField.getText().trim();
+        loadStructureButton.setEnabled(!filePath.isEmpty());
+        
+        String startTag = (String) tagComboBox.getSelectedItem();
+        applyButton.setEnabled(startTag != null && !startTag.trim().isEmpty());
+        updateGenerateButtonState();
+    }
+
+    private void updateGenerateButtonState() {
+        DefaultMutableTreeNode treeRoot = (DefaultMutableTreeNode) treeModel.getRoot();
+        boolean hasSelected = hasSelectedLeaf(treeRoot);
+        generateButton.setEnabled(hasSelected);
+    }
+
+    private boolean hasSelectedLeaf(DefaultMutableTreeNode node) {
+        CheckboxNode checkNode = (CheckboxNode) node.getUserObject();
+        if (checkNode.isLeafField && checkNode.isSelected) {
+            return true;
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            if (hasSelectedLeaf((DefaultMutableTreeNode) node.getChildAt(i))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void openFilterDialog() {
@@ -253,6 +327,7 @@ public class JasperGeneratorApp extends JFrame {
                 treeModel.nodeChanged(child);
             }
         }
+        updateGenerateButtonState();
     }
 
     private void parseXmlStructure() {
@@ -280,6 +355,7 @@ public class JasperGeneratorApp extends JFrame {
 
             DefaultMutableTreeNode treeRoot = (DefaultMutableTreeNode) treeModel.getRoot();
             treeRoot.removeAllChildren();
+            generateButton.setEnabled(false);
 
             rootCheckboxNode = new CheckboxNode(currentDoc.getDocumentElement().getNodeName(), "", "", false);
             treeRoot.setUserObject(rootCheckboxNode);
@@ -373,6 +449,7 @@ public class JasperGeneratorApp extends JFrame {
     private void rebuildTreeWithStartTag(String startTag) {
         DefaultMutableTreeNode treeRoot = (DefaultMutableTreeNode) treeModel.getRoot();
         treeRoot.removeAllChildren();
+        generateButton.setEnabled(false);
         CheckboxNode rootNode = new CheckboxNode(currentDoc.getDocumentElement().getNodeName(), "", "", false);
         treeRoot.setUserObject(rootNode);
 
