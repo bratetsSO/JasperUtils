@@ -1,3 +1,5 @@
+package by.so.jasper_utils;
+
 import org.w3c.dom.*;
 import javax.xml.parsers.*;
 import javax.swing.*;
@@ -450,6 +452,7 @@ public class JasperGeneratorApp extends JFrame {
         DefaultMutableTreeNode treeRoot = (DefaultMutableTreeNode) treeModel.getRoot();
         treeRoot.removeAllChildren();
         generateButton.setEnabled(false);
+        outputTextArea.setText("");
         CheckboxNode rootNode = new CheckboxNode(currentDoc.getDocumentElement().getNodeName(), "", "", false);
         treeRoot.setUserObject(rootNode);
 
